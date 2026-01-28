@@ -106,8 +106,10 @@ def normalize_size(size):
     
     # Конвертація кирилиці в латиницю для розмірів (підтримка великих та малих букв)
     cyrillic_to_latin = {
+        'С': 'S',
         'М': 'M',
         'Л': 'L',
+        'ХС': 'XS',
         'ХЛ': 'XL',
         '2ХЛ': '2XL',
         '3ХЛ': '3XL',
@@ -116,10 +118,9 @@ def normalize_size(size):
         '6ХЛ': '6XL',
         '7ХЛ': '7XL',
         '8ХЛ': '8XL',
-        'С': 'S',
     }
     
-    # Обробка малих букв кирилиці
+    # Обробка малих букв кирилиці: с, м, л -> S, M, L
     if size_lower in ['м', 'л', 'с']:
         if size_lower == 'м':
             return 'M'
@@ -149,12 +150,22 @@ def normalize_size(size):
         elif size_lower == 'хл' or size_lower.startswith('хл'):
             return 'XL'
     
+    # Обробка "хс" (кирилиця) -> XS
+    if size_lower == 'хс':
+        return 'XS'
+    
     # Перевіряємо, чи це повний розмір у кирилиці (великі букви)
     if size_upper in cyrillic_to_latin:
         return cyrillic_to_latin[size_upper]
     
-    # Якщо розмір вже в латиниці (S, M, L, XL, 2XL, 3XL, 4XL, 5XL, 6XL, 7XL, 8XL), повертаємо як є
-    valid_latin_sizes = {'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', '6XL', '7XL', '8XL'}
+    # Виправлення випадків сканера (латиниця замість кирилиці): xc -> XS, c -> S
+    if size_lower == 'xc':
+        return 'XS'
+    if size_lower == 'c' and len(size) == 1:
+        return 'S'
+    
+    # Якщо розмір вже в латиниці (XS, S, M, L, XL, 2XL, 3XL, 4XL, 5XL, 6XL, 7XL, 8XL), повертаємо як є
+    valid_latin_sizes = {'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', '6XL', '7XL', '8XL'}
     if size_upper in valid_latin_sizes:
         return size_upper
     
@@ -200,8 +211,8 @@ def adjust_size(original_size, filter_value):
             new_index = max(0, min(current_index + adjustment, len(size_order) - 1))
             print(f"Original size: {original_size}, Current index: {current_index}, New index: {new_index}, New size: {size_order[new_index]}")
             return size_order[new_index]
-        elif original_size in {"S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL"}:
-            size_order = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL"]
+        elif original_size in {"XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL"}:
+            size_order = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL"]
             current_index = size_order.index(original_size)
             new_index = max(0, min(current_index + adjustment, len(size_order) - 1))
             print(f"Original size: {original_size}, Current index: {current_index}, New index: {new_index}, New size: {size_order[new_index]}")
@@ -218,7 +229,7 @@ def find_item_by_size_in_category(client, size, categories):
 
     allsize_values = {
         "28", "29", "30", "31", "32", "33", "34", "35", "36", "38", "40", "42", "44",
-        "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
+        "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
         "39", "40", "41", "42", "43", "44", "45", "46",
         # Числові розміри (також додаємо їх буквені еквіваленти)
         "48", "50", "52", "54", "56", "58", "60"
@@ -328,7 +339,7 @@ def find_item_by_size_in_category_drop(client, size, categories):
 
     allsize_values = {
         "28", "29", "30", "31", "32", "33", "34", "35", "36", "38", "40", "42", "44",
-        "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
+        "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
         "39", "40", "41", "42", "43", "44", "45", "46",
         # Числові розміри (також додаємо їх буквені еквіваленти)
         "48", "50", "52", "54", "56", "58", "60"
@@ -569,7 +580,7 @@ def get_art_sizes_from_sheets(client, art, categories):
     
     allsize_values = {
         "28", "29", "30", "31", "32", "33", "34", "35", "36", "38", "40", "42", "44",
-        "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
+        "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
         "39", "40", "41", "42", "43", "44", "45", "46",
         # Числові розміри (також додаємо їх буквені еквіваленти)
         "48", "50", "52", "54", "56", "58", "60"
@@ -648,7 +659,7 @@ def load_all_arts_from_category(client, category):
     
     allsize_values = {
         "28", "29", "30", "31", "32", "33", "34", "35", "36", "38", "40", "42", "44",
-        "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
+        "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL", "8XL",
         "39", "40", "41", "42", "43", "44", "45", "46",
         # Числові розміри (також додаємо їх буквені еквіваленти)
         "48", "50", "52", "54", "56", "58", "60"
