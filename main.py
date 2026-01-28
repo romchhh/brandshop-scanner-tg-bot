@@ -5,7 +5,10 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import token
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 
 bot = Bot(token=token)

@@ -10,7 +10,7 @@ from keyboards.inventory_keyboards import get_inventory_keyboard
 from states.inventory_states import InventoryStates
 from utils.admin_utils import check_admin
 from utils.category_translations import get_category_ua
-from utils.excel_generator import generate_inventory_excel
+from utils.excel_generator import generate_inventory_excel, calculate_statistics
 from utils.sheets_utils import (
     parse_csv_file, 
     compare_inventory_with_sheets, 
@@ -134,38 +134,66 @@ async def handle_document(message: Message, state: FSMContext):
         await message.answer("Порівнюю з Google таблицями...")
         results = compare_inventory_with_sheets(client, inventory_data)
         
-        # Визначаємо категорію - знаходимо найчастішу категорію серед артикулів
+        # Визначаємо всі категорії з файлу (можливо кілька: взуття + зимове взуття тощо)
+        # Для артикулів з кількома категоріями (як "Об") враховуємо всі категорії
         category_count = {}
         for data_info in inventory_data.values():
             original_art = data_info['original_art']
             categories = get_category_by_prefix(original_art)
             if categories:
-                category = categories[0]
-                category_count[category] = category_count.get(category, 0) + 1
+                # Додаємо всі категорії зі списку (не тільки першу)
+                for category in categories:
+                    category_count[category] = category_count.get(category, 0) + 1
         
         if category_count:
-            # Беремо найчастішу категорію
-            category = max(category_count, key=category_count.get)
+            # Список усіх категорій (від найчастішої до рідкісної)
+            categories_sorted = sorted(category_count, key=category_count.get, reverse=True)
+            categories_ua = [get_category_ua(cat) for cat in categories_sorted]
+            category = categories_sorted[0]
+            category_ua = categories_ua[0]
         else:
             # Якщо не вдалося визначити, беремо з першого артикулу
             first_art = list(inventory_data.values())[0]['original_art']
             categories = get_category_by_prefix(first_art)
             category = categories[0] if categories else "unknown"
+            category_ua = get_category_ua(category)
+            categories_ua = [category_ua]
         
-        category_ua = get_category_ua(category)
-        
-        # Зберігаємо результати в стані для генерації файлу
+        # Зберігаємо результати в стані для генерації файлу (включаючи список категорій)
         await state.update_data(
             results=results,
             inventory_data=inventory_data,
             category=category,
-            category_ua=category_ua
+            category_ua=category_ua,
+            categories_ua=categories_ua
         )
         
-        # Формуємо результат
+        # Створюємо мапу для підрахунку статистики
+        art_map = {}
+        for norm_art, data_info in inventory_data.items():
+            original_art = data_info['original_art']
+            art_map[original_art] = {
+                'original_art': original_art,
+                'sizes': data_info['sizes'],
+                'original_sizes': data_info.get('original_sizes', {}),
+                'amount': data_info.get('amount', 0)
+            }
+        
+        # Підраховуємо статистику
+        stats = calculate_statistics(results, inventory_data, art_map)
+        
+        # Формуємо результат (показуємо всі категорії з файлу)
+        categories_display = ", ".join(categories_ua)
         message_parts = []
-        message_parts.append(f"📋 Категорія: {category_ua}\n")
+        message_parts.append(f"📋 Категорії: {categories_display}\n")
         message_parts.append(f"📊 Всього артикулів у файлі: {len(inventory_data)}\n\n")
+        
+        # Додаємо статистику
+        message_parts.append("📈 СТАТИСТИКА:\n")
+        message_parts.append(f"Розмірів: {stats['total_sizes']}\n")
+        message_parts.append(f"Сошлося: {stats['matched_sizes']}\n")
+        message_parts.append(f"Недостача: {stats['missing_sizes']}\n")
+        message_parts.append(f"Не відскановано: {stats['not_scanned_sizes']}\n\n")
         
         if results['missing_sizes']:
             message_parts.append("❌ НЕДОСТАЧА РОЗМІРІВ:")
@@ -186,7 +214,7 @@ async def handle_document(message: Message, state: FSMContext):
         if results['matched']:
             message_parts.append(f"\n\n✓ СПІВПАДАЮТЬ ({len(results['matched'])} артикулів)")
         
-        result_message = ''.join(message_parts) if message_parts else f"Всі артикули з категорії {category_ua} співпадають!"
+        result_message = ''.join(message_parts) if message_parts else f"Всі артикули ({categories_display}) співпадають!"
         
         # Створюємо інлайн кнопку
         keyboard = [
@@ -296,17 +324,24 @@ async def get_excel_file(callback: CallbackQuery, state: FSMContext):
     
     results = state_data['results']
     inventory_data = state_data['inventory_data']
-    category_ua = state_data.get('category_ua', 'Невідома категорія')
+    # Підтримка кількох категорій: categories_ua — список, інакше fallback на одну категорію
+    categories_ua = state_data.get('categories_ua')
+    if not categories_ua:
+        categories_ua = [state_data.get('category_ua', 'Невідома категорія')]
+    if isinstance(categories_ua, str):
+        categories_ua = [categories_ua]
+    categories_display = ", ".join(categories_ua)
+    filename_safe = "_".join(c.replace(" ", "_") for c in categories_ua)
     
     try:
         await callback.answer("Генерую файл...")
         
-        # Генеруємо Excel файл
-        excel_path = generate_inventory_excel(results, inventory_data, category_ua)
+        # Генеруємо Excel файл (передаємо рядок з усіма категоріями для підпису)
+        excel_path = generate_inventory_excel(results, inventory_data, categories_display)
         
-        # Відправляємо файл
-        file = FSInputFile(excel_path, filename=f"переоблік_{category_ua}.xlsx")
-        await callback.message.answer_document(file, caption=f"📊 Результати переобліку: {category_ua}")
+        # Відправляємо файл з назвою за категоріями
+        file = FSInputFile(excel_path, filename=f"переоблік_{filename_safe}.xlsx")
+        await callback.message.answer_document(file, caption=f"📊 Результати переобліку: {categories_display}")
         
         # Видаляємо тимчасовий файл
         if os.path.exists(excel_path):
@@ -354,14 +389,16 @@ async def handle_category_file(message: Message, state: FSMContext):
             )
             return
         
-        # Визначаємо категорію - знаходимо найчастішу категорію серед артикулів
+        # Визначаємо всі категорії з файлу (можливо кілька)
+        # Для артикулів з кількома категоріями (як "Об") враховуємо всі категорії
         category_count = {}
         for data_info in inventory_data.values():
             original_art = data_info['original_art']
             categories = get_category_by_prefix(original_art)
             if categories:
-                category = categories[0]
-                category_count[category] = category_count.get(category, 0) + 1
+                # Додаємо всі категорії зі списку (не тільки першу)
+                for category in categories:
+                    category_count[category] = category_count.get(category, 0) + 1
         
         if not category_count:
             first_art = list(inventory_data.values())[0]['original_art']
@@ -377,27 +414,52 @@ async def handle_category_file(message: Message, state: FSMContext):
             )
             return
         
-        # Беремо найчастішу категорію
-        category = max(category_count, key=category_count.get)
-        category_ua = get_category_ua(category)
+        # Список усіх категорій (від найчастішої до рідкісної)
+        categories_sorted = sorted(category_count, key=category_count.get, reverse=True)
+        categories_ua = [get_category_ua(cat) for cat in categories_sorted]
+        category = categories_sorted[0]
+        category_ua = categories_ua[0]
+        categories_display = ", ".join(categories_ua)
         
-        await message.answer(f"Визначено категорію: {category_ua}\nПорівнюю з Google таблицями...")
+        await message.answer(f"Визначено категорії: {categories_display}\nПорівнюю з Google таблицями...")
         
         # Порівнюємо з таблицями
         results = compare_inventory_with_sheets(client, inventory_data)
         
-        # Зберігаємо результати в стані для генерації файлу
+        # Зберігаємо результати в стані для генерації файлу (включаючи список категорій)
         await state.update_data(
             results=results,
             inventory_data=inventory_data,
             category=category,
-            category_ua=category_ua
+            category_ua=category_ua,
+            categories_ua=categories_ua
         )
         
-        # Формуємо результат
+        # Створюємо мапу для підрахунку статистики
+        art_map = {}
+        for norm_art, data_info in inventory_data.items():
+            original_art = data_info['original_art']
+            art_map[original_art] = {
+                'original_art': original_art,
+                'sizes': data_info['sizes'],
+                'original_sizes': data_info.get('original_sizes', {}),
+                'amount': data_info.get('amount', 0)
+            }
+        
+        # Підраховуємо статистику
+        stats = calculate_statistics(results, inventory_data, art_map)
+        
+        # Формуємо результат (показуємо всі категорії)
         message_parts = []
-        message_parts.append(f"📋 Категорія: {category_ua}\n")
+        message_parts.append(f"📋 Категорії: {categories_display}\n")
         message_parts.append(f"📊 Всього артикулів у файлі: {len(inventory_data)}\n\n")
+        
+        # Додаємо статистику
+        message_parts.append("📈 СТАТИСТИКА:\n")
+        message_parts.append(f"Розмірів: {stats['total_sizes']}\n")
+        message_parts.append(f"Сошлося: {stats['matched_sizes']}\n")
+        message_parts.append(f"Недостача: {stats['missing_sizes']}\n")
+        message_parts.append(f"Не відскановано: {stats['not_scanned_sizes']}\n\n")
         
         if results['missing_sizes']:
             message_parts.append("❌ НЕДОСТАЧА РОЗМІРІВ:")
@@ -418,7 +480,7 @@ async def handle_category_file(message: Message, state: FSMContext):
         if results['matched']:
             message_parts.append(f"\n\n✓ СПІВПАДАЮТЬ ({len(results['matched'])} артикулів)")
         
-        result_message = ''.join(message_parts) if message_parts else f"Всі артикули з категорії {category_ua} співпадають!"
+        result_message = ''.join(message_parts) if message_parts else f"Всі артикули ({categories_display}) співпадають!"
         
         # Створюємо інлайн кнопку
         keyboard = [
