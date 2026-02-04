@@ -46,10 +46,24 @@ def get_category_by_prefix(art):
 def has_sizes(category):
     """
     Перевіряє, чи категорія має розміри
-    Категорії без розмірів: hats, belts, bags, purses
+    Категорії без розмірів: hats, belts, bags, purses, glasses (окуляри)
     """
-    categories_without_sizes = {'hats', 'belts', 'bags', 'purses'}
+    categories_without_sizes = {'hats', 'belts', 'bags', 'purses', 'glasses'}
     return category not in categories_without_sizes
+
+
+def parse_amount_from_cell(cell_value):
+    """
+    Витягує кількість з комірки Google таблиці.
+    "2" -> 2
+    "2, (,1,-склад)" -> 2+1=3
+    "2, (,2,-склад)" -> 2+2=4
+    Сумує всі числа в рядку.
+    """
+    if not cell_value or not str(cell_value).strip():
+        return 0
+    numbers = re.findall(r'\d+', str(cell_value).strip())
+    return sum(int(n) for n in numbers) if numbers else 0
 
 
 
@@ -465,11 +479,8 @@ def extract_base_art(art):
     # Видаляємо пробіли та дефіси для нормалізації
     art = art.strip()
     
-    # Спроба видалити розмір з кінця (формат типу "Дж-553.38" або "Ко-450.38")
-    # Шукаємо останню крапку або дефіс перед числом
-    import re
-    # Видаляємо розмір після останньої крапки або дефісу, якщо це число
-    base_art = re.sub(r'[.\-]\d+$', '', art)
+    # Видаляємо тільки .число в кінці (.130, .38). НЕ -200 — це частина артикулу Ре-200
+    base_art = re.sub(r'\.\d+$', '', art)
     
     return base_art.strip()
 
@@ -500,8 +511,13 @@ def parse_csv_file(file_path):
                 art = row[1].strip() if len(row) > 1 else ""
                 # Розмір з четвертого стовпця (індекс 3) - "Інформація"
                 size_info = row[3].strip() if len(row) > 3 else ""
-                # Кількість з шостого стовпця (індекс 5) - "Відскановано"
-                amount = row[5].strip() if len(row) > 5 else "1"
+                # Кількість: F (індекс 5) "Відскановано", fallback на E (індекс 4) для 5-колонкового CSV
+                if len(row) > 5 and row[5].strip():
+                    amount = row[5].strip()
+                elif len(row) > 4 and row[4].strip():
+                    amount = row[4].strip()
+                else:
+                    amount = "1"
                 
                 if not art:
                     continue
@@ -512,14 +528,9 @@ def parse_csv_file(file_path):
                 if categories:
                     category_has_sizes = has_sizes(categories[0])
                 
-                # Для товарів БЕЗ розмірів (як шапки) - зберігаємо повний артикул
-                # Для товарів З розмірами - витягуємо базовий артикул (групуємо по артикулу)
-                if size_info and size_info.strip() and category_has_sizes:
-                    # Є розмір - витягуємо базовий артикул для групування
-                    base_art = extract_base_art(art)
-                else:
-                    # Немає розміру або товар без розмірів - зберігаємо повний артикул
-                    base_art = art
+                # Завжди витягуємо базовий артикул для пошуку (Ре-210.130 -> Ре-210)
+                # Частина після крапки (.130) — це варіант/розмір, не використовуємо при пошуку
+                base_art = extract_base_art(art)
                 
                 # Нормалізуємо артикул для порівняння
                 normalized_art = normalize_art(base_art)
@@ -689,7 +700,8 @@ def load_all_arts_from_category(client, category):
                         if not row_art or not row_art.strip():
                             continue
                         
-                        normalized_art = normalize_art(row_art)
+                        base_art = extract_base_art(row_art)
+                        normalized_art = normalize_art(base_art)
                         row_size = size_column[i] if i < len(size_column) else "-"
                         row_amount = amount_column[i] if i < len(amount_column) else ""
                         
@@ -703,16 +715,13 @@ def load_all_arts_from_category(client, category):
                             all_arts_data[normalized_art] = {
                                 'sizes': {},
                                 'amount': 0,
-                                'original_art': row_art  # Зберігаємо оригінальний артикул
+                                'original_art': base_art  # Базовий артикул для відображення
                             }
                         
-                        # Для товарів без розмірів читаємо amount
+                        # Для товарів без розмірів читаємо amount (колонка amount, не size)
+                        # Обробляємо формат "2, (,1,-склад)" — сумуємо всі числа
                         if not category_has_sizes:
-                            try:
-                                amount_value = int(row_amount) if row_amount and row_amount.strip() else 0
-                                all_arts_data[normalized_art]['amount'] = amount_value
-                            except ValueError:
-                                all_arts_data[normalized_art]['amount'] = 0
+                            all_arts_data[normalized_art]['amount'] += parse_amount_from_cell(row_amount)
                         # Обробляємо розміри тільки якщо вони є та категорія має розміри
                         elif row_size and row_size != "-" and row_size.strip():
                             # Використовуємо split_allsizes для правильного розбиття по комах (зберігає дефіси)
@@ -796,31 +805,26 @@ def load_all_arts_from_category(client, category):
                     if not row_art or not row_art.strip():
                         continue
                     
-                    normalized_art = normalize_art(row_art)
+                    base_art = extract_base_art(row_art)
+                    normalized_art = normalize_art(base_art)
                     row_size = size_column[i] if i < len(size_column) else "-"
                     row_amount = amount_column[i] if i < len(amount_column) else ""
                     
                     # Логування для діагностики
                     import logging
-                    logging.debug(f"[load_all_arts] Читаємо артикул: {row_art}, розміри: '{row_size}', кількість: '{row_amount}'")
+                    logging.debug(f"[load_all_arts] Читаємо артикул: {row_art}, base: {base_art}, розміри: '{row_size}', кількість: '{row_amount}'")
                     
                     # Ініціалізуємо dict для артикулу, якщо його ще немає
-                    # Структура: {'sizes': {розмір: кількість}, 'amount': кількість, 'original_art': оригінальний_артикул}
                     if normalized_art not in all_arts_data:
                         all_arts_data[normalized_art] = {
                             'sizes': {},
                             'amount': 0,
-                            'original_art': row_art  # Зберігаємо оригінальний артикул
+                            'original_art': base_art
                         }
                     
-                    # Для товарів без розмірів читаємо amount
+                    # Для товарів без розмірів читаємо amount (колонка amount, не size)
                     if not category_has_sizes:
-                        try:
-                            amount_value = int(row_amount) if row_amount and row_amount.strip() else 0
-                            all_arts_data[normalized_art]['amount'] = amount_value
-                        except ValueError:
-                            all_arts_data[normalized_art]['amount'] = 0
-                    # Обробляємо розміри тільки якщо вони є та категорія має розміри
+                        all_arts_data[normalized_art]['amount'] += parse_amount_from_cell(row_amount)
                     elif row_size and row_size != "-" and row_size.strip():
                         # Використовуємо split_allsizes для правильного розбиття по комах (зберігає дефіси)
                         row_sizes_list = split_allsizes(row_size)

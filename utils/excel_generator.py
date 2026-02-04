@@ -174,17 +174,8 @@ def generate_inventory_excel(results, inventory_data, category_ua):
     for original_art, sizes in results.get('extra_sizes', {}).items():
         if original_art in art_map:
             data = art_map[original_art]
-            # sizes тепер це dict {нормалізований_розмір: кількість}
-            if data['sizes']:
-                sizes_list = []
-                for normalized_size, qty in sorted(data['sizes'].items()):
-                    if normalized_size:  # Пропускаємо порожній розмір
-                        # Використовуємо оригінальний розмір з CSV замість нормалізованого
-                        original_size = get_original_size(data, normalized_size)
-                        sizes_list.append(f"{original_size} ({qty})" if qty > 1 else original_size)
-                sizes_str = ', '.join(sizes_list) if sizes_list else 'Без розмірів'
-            else:
-                sizes_str = 'Без розмірів'
+            # Використовуємо format_sizes_for_display для nosize (показує "N шт") та size-товарів
+            sizes_str = format_sizes_for_display(data)
             # sizes - це список рядків з описом надлишку (містить нормалізовані розміри)
             if isinstance(sizes, list):
                 extra_str = ', '.join(sizes) if sizes else ''
