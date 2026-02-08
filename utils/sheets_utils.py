@@ -471,6 +471,17 @@ def normalize_art(art):
     return normalized
 
 
+# Значення заголовків — пропускаємо при читанні з таблиць
+HEADER_ART_VALUES = {'артикул', 'арт', 'код', 'назва', 'розмір', 'кількість', 'цена', 'ціна', 'фото'}
+
+
+def _is_header_row(art):
+    """Перевіряє, чи артикул є заголовком таблиці (пропускаємо при читанні)"""
+    if not art or not str(art).strip():
+        return True
+    return str(art).strip().lower() in HEADER_ART_VALUES
+
+
 def extract_base_art(art):
     """Витягує базовий артикул, видаляючи розмір з кінця"""
     if not art:
@@ -519,7 +530,7 @@ def parse_csv_file(file_path):
                 else:
                     amount = "1"
                 
-                if not art:
+                if not art or _is_header_row(art):
                     continue
                 
                 # Визначаємо категорію для перевірки, чи має товар розміри
@@ -697,7 +708,7 @@ def load_all_arts_from_category(client, category):
                     ]
                     
                     for i, row_art in enumerate(art_column):
-                        if not row_art or not row_art.strip():
+                        if not row_art or not row_art.strip() or _is_header_row(row_art):
                             continue
                         
                         base_art = extract_base_art(row_art)
@@ -802,7 +813,7 @@ def load_all_arts_from_category(client, category):
                 ]
                 
                 for i, row_art in enumerate(art_column):
-                    if not row_art or not row_art.strip():
+                    if not row_art or not row_art.strip() or _is_header_row(row_art):
                         continue
                     
                     base_art = extract_base_art(row_art)

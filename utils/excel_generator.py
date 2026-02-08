@@ -297,8 +297,15 @@ def generate_inventory_excel(results, inventory_data, category_ua):
                 'type': 'matched'  # Білий - все нормально
             })
     
+    # Фільтруємо заголовки ("Артикул" тощо) з file_rows
+    header_arts = {'артикул', 'арт', 'код'}
+    file_rows_filtered = [
+        r for r in file_rows
+        if str(r.get('art', '')).strip().lower() not in header_arts
+    ]
+    
     # Додаємо рядки до таблиці
-    for row_data in file_rows:
+    for row_data in file_rows_filtered:
         ws.append([
             row_data['art'],
             row_data['sizes'],
@@ -313,7 +320,7 @@ def generate_inventory_excel(results, inventory_data, category_ua):
     yellow_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # Жовтий
     
     # Застосовуємо кольори до рядків
-    for idx, row_data in enumerate(file_rows):
+    for idx, row_data in enumerate(file_rows_filtered):
         row_num = idx + 2  # Починаємо з 2, бо 1 - заголовок
         row_type = row_data['type']
         
